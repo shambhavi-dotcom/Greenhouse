@@ -1,0 +1,95 @@
+"""
+openenv.yaml
+
+OpenEnv configuration for the greenhouse environment.
+Specifies environment metadata, observation/action spaces, and task definitions.
+"""
+
+name: "Greenhouse"
+version: "1.0.0"
+description: "AI-driven greenhouse operations simulator with sequential decision-making"
+
+# Environment metadata
+environment:
+  type: "gymnasium"
+  entry_point: "env.environment:GreenhouseEnv"
+  max_episode_steps: 500
+  kwargs:
+    crop: "tomato"
+    max_episode_steps: 500
+    include_weather: false
+    include_resource_limits: true
+    difficulty: "medium"
+
+# Observation space
+observation:
+  type: "continuous"
+  shape: [10]
+  low: [-inf]
+  high: [inf]
+  description: |
+    [0] temperature (°C)
+    [1] humidity (%)
+    [2] co2 (ppm)
+    [3] light_intensity (µmol/m²/s)
+    [4] water_level (units)
+    [5] energy_level (units)
+    [6] crop_health (0.0-1.0)
+    [7] mold_presence (0.0-1.0)
+    [8] time_of_day (normalized)
+    [9] day_counter (normalized)
+
+# Action space
+action:
+  type: "continuous"
+  shape: [8]
+  low: [0.0]
+  high: [1.0]
+  description: |
+    [0] heating intensity
+    [1] cooling intensity
+    [2] humidifying intensity
+    [3] dehumidifying intensity
+    [4] ventilation intensity
+    [5] irrigation intensity
+    [6] lighting intensity
+    [7] co2_enrichment intensity
+
+# Tasks
+tasks:
+  - name: "easy"
+    description: "Stabilization - maintain crop health in static environment"
+    difficulty: 1
+    episodes: 10
+    max_steps: 100
+    entry_point: "tasks.task_easy:EasyTask"
+  
+  - name: "medium"
+    description: "Adaptation - reactive control under weather disturbances"
+    difficulty: 2
+    episodes: 20
+    max_steps: 200
+    entry_point: "tasks.task_medium:MediumTask"
+  
+  - name: "hard"
+    description: "Optimization - planning under resource constraints"
+    difficulty: 3
+    episodes: 30
+    max_steps: 500
+    entry_point: "tasks.task_hard:HardTask"
+
+# Reward structure
+reward:
+  crop_health_weight: 1.0
+  stability_weight: 0.5
+  resource_cost_weight: 0.3
+  penalties:
+    mold: 10.0
+    freeze_damage: 20.0
+    crop_death: 50.0
+
+# Agent interface
+agent:
+  entry_point: "inference:GreenhouseAgent"
+  method: "select_action"
+  action_type: "continuous"
