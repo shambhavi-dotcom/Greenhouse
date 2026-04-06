@@ -23,6 +23,8 @@ def apply_dynamics(
     state: GreenhouseState,
     actions: list[Action],
     crop_profile: dict,
+    include_weather: bool = False,
+    include_resource_limits: bool = True,
     dt: float = 1.0,
 ) -> Tuple[GreenhouseState, dict]:
     """
@@ -60,6 +62,8 @@ def apply_dynamics(
     new_state.time_of_day = (new_state.time_of_day + int(dt)) % 24
     if new_state.time_of_day < prev_time:
         new_state.day_counter += 1
+        new_state.daily_water_added = 0.0
+        new_state.daily_energy_used = 0.0
     
     # ========================================================================
     # 2. EXTRACT ACTION INTENSITIES
@@ -77,11 +81,17 @@ def apply_dynamics(
     # ========================================================================
     # 3. EXTERNAL WEATHER (varies by difficulty)
     # ========================================================================
-    # Base ambient temperature changes throughout the day
-    ambient_temp = 15.0 + 8.0 * max(0, np.sin(np.pi * (new_state.time_of_day - 6) / 12))
-    # Add small random disturbances if harder difficulty
-    if new_state.day_counter > 1:  # Simple pseudo-weather after day 1
-        ambient_temp += 0.5 * np.sin(new_state.day_counter * 0.5)
+    # Easy/static mode uses constant ambient temperature.
+    if include_weather:
+        base_ambient = 15.0 + 8.0 * max(0, np.sin(np.pi * (new_state.time_of_day - 6) / 12))
+        # Deterministic pseudo-shock up to +/-5C every 4 hours.
+        if new_state.time_of_day % 4 == 0:
+            phase = (new_state.day_counter * 24 + new_state.time_of_day) * 0.37
+            new_state.external_weather["temp_shift"] = float(5.0 * np.sin(phase))
+        ambient_temp = base_ambient + new_state.external_weather.get("temp_shift", 0.0)
+    else:
+        ambient_temp = 15.0
+        new_state.external_weather["temp_shift"] = 0.0
     
     # ========================================================================
     # 4. COMPUTE NATURAL LIGHT (sun position)
@@ -97,12 +107,45 @@ def apply_dynamics(
     new_state.light_intensity = np.clip(natural_light + supplemental_light, 0, 1000)
     
     # ========================================================================
-    # 5. TEMPERATURE DYNAMICS
+    # 5. RESOURCE-LIMIT SCALING (DAILY BUDGETS)
+    # ========================================================================
+    planned_energy_use = (
+        heating * 0.5 + cooling * 0.6 + ventilation * 1.0 + humidify * 2.0 +
+        dehumidify * 1.5 + lighting * 0.1 * (new_state.light_intensity / 500.0) +
+        co2_enrichment * 1.5 + irrigation * 0.5
+    )
+    planned_water_add = irrigation * 5.0 * dt
+
+    if include_resource_limits:
+        energy_remaining = max(0.0, constants.DAILY_ENERGY_LIMIT - new_state.daily_energy_used)
+        water_remaining = max(0.0, constants.DAILY_WATER_LIMIT - new_state.daily_water_added)
+
+        energy_scale = 1.0 if planned_energy_use <= 0 else min(1.0, energy_remaining / planned_energy_use)
+        water_scale = 1.0 if planned_water_add <= 0 else min(1.0, water_remaining / planned_water_add)
+
+        scale = min(energy_scale, water_scale)
+        heating *= scale
+        cooling *= scale
+        humidify *= scale
+        dehumidify *= scale
+        ventilation *= scale
+        irrigation *= scale
+        lighting *= scale
+        co2_enrichment *= scale
+
+    # ========================================================================
+    # 6. TEMPERATURE DYNAMICS
     # ========================================================================
     prev_temp = new_state.temperature
     
-    # Natural decay toward ambient (1/4°C per hour time constant)
-    temp_decay = (ambient_temp - new_state.temperature) / 4.0 * dt
+    # ========================================================================
+    # 6. TEMPERATURE DYNAMICS
+    # ========================================================================
+    prev_temp = new_state.temperature
+    
+    # Natural decay toward ambient (8-hour time constant - softened from 4)
+    # This ensures that actions can more easily overcome natural drift.
+    temp_decay = (ambient_temp - new_state.temperature) / 8.0 * dt
     
     # Day/night radiative effects
     if 6 <= new_state.time_of_day <= 18:
@@ -110,22 +153,25 @@ def apply_dynamics(
     else:
         radiative_effect = -0.3  # Cooling at night
     
-    # Action effects
-    temp_heating = heating * 2.0 * dt  # +2°C per hour at full intensity
-    temp_cooling = -cooling * 2.5 * dt  # -2.5°C per hour at full intensity
-    temp_ventilation = -ventilation * 0.5 * dt  # Ventilation cools slightly
+    # Action effects (increased power to reach setpoint more quickly)
+    temp_heating = heating * 4.0 * dt  # +4°C per hour at full intensity
+    temp_cooling = -cooling * 4.5 * dt # -4.5°C per hour at full intensity
+    temp_ventilation = -ventilation * 0.8 * dt
     
     # Humidification/dehumidification interact with temperature
-    # Misting cools (evaporative effect)
     temp_misting = -humidify * 0.2 * dt
     
     new_state.temperature += temp_decay + radiative_effect + temp_heating + temp_cooling + temp_ventilation + temp_misting
     
     info["temperature_change"] = new_state.temperature - prev_temp
-    info["energy_used"] += heating * 0.5 + cooling * 0.6 + ventilation * 1.0 + humidify * 2.0 + dehumidify * 1.5 + lighting * 0.1 * new_state.light_intensity / 500 + co2_enrichment * 1.5
+    info["energy_used"] += (
+        heating * 0.5 + cooling * 0.6 + ventilation * 1.0 + humidify * 2.0 +
+        dehumidify * 1.5 + lighting * 0.1 * new_state.light_intensity / 500 +
+        co2_enrichment * 1.5 + irrigation * 0.5
+    )
     
     # ========================================================================
-    # 6. HUMIDITY DYNAMICS
+    # 7. HUMIDITY DYNAMICS
     # ========================================================================
     prev_humidity = new_state.humidity
     
@@ -152,7 +198,7 @@ def apply_dynamics(
     info["humidity_change"] = new_state.humidity - prev_humidity
     
     # ========================================================================
-    # 7. CO2 DYNAMICS
+    # 8. CO2 DYNAMICS
     # ========================================================================
     # Plant uptake during photosynthesis
     photosynthesis_rate = new_state.crop_health * new_state.light_intensity / 600
@@ -170,7 +216,7 @@ def apply_dynamics(
     new_state.co2 += -co2_uptake * dt + ventilation_effect + enrichment_effect + ambient_exchange
     
     # ========================================================================
-    # 8. WATER DYNAMICS
+    # 9. WATER DYNAMICS
     # ========================================================================
     # Crop consumption (from evapotranspiration)
     water_consumption = water_loss * 0.8  # Crops use ~80% of evapotranspired water
@@ -181,28 +227,26 @@ def apply_dynamics(
     new_state.water_level += -water_consumption + water_irrigation
     
     info["water_used"] = water_consumption
+    new_state.daily_water_added += max(0.0, water_irrigation)
     
     # ========================================================================
-    # 9. ENERGY DYNAMICS
+    # 10. ENERGY DYNAMICS
     # ========================================================================
-    # Solar production during day
-    solar_production = (new_state.light_intensity / 600) * 30 * dt
-    
-    # Energy consumption (already computed in action costs)
+    # Requested behavior: no solar refill, energy only decreases by machine use.
     energy_consumption = info["energy_used"]
-    
-    new_state.energy_level += solar_production - energy_consumption
+    new_state.energy_level -= energy_consumption
+    new_state.daily_energy_used += energy_consumption
     
     # ========================================================================
-    # 10. CROP HEALTH DYNAMICS
+    # 11. CROP HEALTH DYNAMICS
     # ========================================================================
     prev_health = new_state.crop_health
     
     # Condition deviations from optimal
-    temp_optimal = crop_profile.get("optimal_temperature", 22)
-    humidity_optimal = crop_profile.get("optimal_humidity", 65)
-    co2_optimal = crop_profile.get("optimal_co2", 1000)
-    light_optimal = crop_profile.get("optimal_light", 600)
+    temp_optimal = crop_profile.get("temp_optimal", 22)
+    humidity_optimal = crop_profile.get("humidity_optimal", 65)
+    co2_optimal = crop_profile.get("co2_optimal", 1000)
+    light_optimal = crop_profile.get("light_optimal", 600)
     
     temp_stress = abs(new_state.temperature - temp_optimal) / 10
     humidity_stress = abs(new_state.humidity - humidity_optimal) / 20
@@ -241,7 +285,7 @@ def apply_dynamics(
     info["crop_health_change"] = new_state.crop_health - prev_health
     
     # ========================================================================
-    # 11. MOLD DYNAMICS
+    # 12. MOLD DYNAMICS
     # ========================================================================
     # Mold grows when warm + humid
     mold_growth = 0.0
@@ -254,7 +298,7 @@ def apply_dynamics(
     new_state.mold_presence += mold_growth + mold_suppression
     
     # ========================================================================
-    # 12. RESOURCE CONSTRAINTS
+    # 13. RESOURCE CONSTRAINTS
     # ========================================================================
     # Hard limits on resources
     if new_state.water_level < 0:
@@ -268,7 +312,7 @@ def apply_dynamics(
             new_state.crop_health = max(0, new_state.crop_health - 0.2)
     
     # ========================================================================
-    # 13. CLAMP ALL VALUES
+    # 14. CLAMP ALL VALUES
     # ========================================================================
     new_state = _clamp_state(new_state)
     

@@ -1,0 +1,108 @@
+GREENHOUSE CHANGE LOG
+Date: 2026-04-07
+
+Summary
+- Implemented requested product redesign across simulation and frontend.
+- Added 4-crop simulation outputs with sidebar crop selector.
+- Removed mold display from the app UI entirely.
+- Removed solar energy refill behavior; energy now only decreases by machine usage.
+- Added clearer feature/machine presentation in UI.
+- **OpenEnv Alignment**: Implemented typed Pydantic models, `state()` API, and structured `inference.py` logging.
+- **Real-Time Playback**: Refactored `app.py` for live step-by-step visualization.
+- **Validators**: Added pre-submission validation scripts (`scripts/`).
+
+Implemented Changes
+
+1) Mold feature removed from app UI
+- File: app.py
+- Mold metric card removed from dashboard.
+- Mold charts removed from episode charts.
+- Mold field removed from exported episode CSV.
+- Note: Internal mold state remains in backend model for now, but is not surfaced in UI.
+
+2) Four-crop simulation outputs with left navbar access
+- File: app.py
+- Added crop list: tomato, lettuce, herbs, cucumber.
+- Added sidebar selector: Crop Output.
+- Single Episode mode now runs all 4 crops in one click and shows per-crop summary table.
+- Detailed plots switch according to selected crop in left sidebar.
+- Batch Evaluation now evaluates all 4 crops and reports per-crop metrics.
+
+3) Energy behavior changed (no daytime refill)
+- Files: env/dynamics.py, env/state.py, config/constants.py
+- Removed solar production contribution from energy update.
+- Energy now decreases only by machine/action consumption.
+- Initial energy set to full/optimal (100).
+
+4) Clear feature + machine categories in UI
+- File: app.py
+- Feature-centric labels emphasized:
+  - Temperature
+  - Humidity
+  - Soil Moisture
+  - CO2
+  - Light
+- Machine intensity charts added:
+  - Fan (ventilation)
+  - Water Sprinter (irrigation)
+  - CO2 Emitter
+  - Light Control
+
+5) Simulation correctness fixes applied while implementing requests
+- Files: env/dynamics.py, env/environment.py
+- Wired include_weather/include_resource_limits flags from environment into dynamics.
+- Added deterministic weather shocks up to +/-5C in weather-enabled modes.
+- Enforced daily resource limits via scaling of action intensities.
+- Added state tracking and reset for:
+  - daily_water_added
+  - daily_energy_used
+- Corrected crop-optimal key mapping in dynamics to match crop profile schema.
+
+6) Added 4th crop profile
+- File: config/crop_profiles.py
+- Added cucumber profile with unique optimal conditions.
+
+Validation
+- Syntax compile check executed for updated Python files.
+- End-to-end CLI run executed successfully after changes.
+- Current baseline score observed around 0.798 overall.
+
+Documentation Cleanup
+- Kept only:
+  - README.md (application description)
+  - QUICKSTART.md (how to run frontend/backend)
+7) OpenEnv Alignment & Typed Interfaces
+- Files: env/models.py, env/environment.py
+- Implemented Pydantic v2 models for `GreenhouseObservation`, `GreenhouseAction`, and `GreenhouseReward`.
+- Added `get_state()` method to `GreenhouseEnv` (OpenEnv `state()` equivalent) returning a typed model.
+- Added `typed_step()` and `typed_reset()` for easier agent integration.
+- Renamed internal state to `self._state` to support the required `state()` API without collision.
+
+8) Inference Script Major Refactor
+- File: inference.py
+- Full rewrite using the `openai` client.
+- Implemented mandatory structured logging: `[START]`, `[STEP]`, `[END]` to stdout.
+- Added support for `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN` environment variables.
+- Added `RandomAgent` fallback for robust evaluation in minimal environments.
+
+9) Real-Time Visual Playback
+- File: app.py
+- "Single Episode" mode now performs real-time step playback using `st.empty` containers.
+- Users can watch live sensor metrics and interactive charts update as the agent acts.
+- Added "Typed State Inspector" (JSON) to show OpenEnv model live.
+
+10) Infrastructure & Verification
+- Files: Dockerfile, openenv.yaml, scripts/
+- Sanitized `Dockerfile` and `openenv.yaml` (removed invalid Python docstrings).
+- Fixed `Dockerfile` CMD to run the Streamlit dashboard by default (required for HF Spaces).
+- Added `EXPOSE 7860` for HF compatibility.
+- Created `scripts/validate_submission.py` (Python) and `scripts/validate-submission.sh` (Bash) for submission readiness.
+
+Validation
+- Baseline: 19/19 units in `verify_ps_alignment.py` PASSED.
+- Inference: Structured logs verified; average scores ~0.82 observed.
+- YAML/Docker: Syntax checked for HF Space compatibility.
+
+Remaining Notes
+- Internal model still computes mold in backend state/reward logic; UI exposure removed.
+- If you want mold fully removed from backend model too, that can be done in a follow-up refactor.
