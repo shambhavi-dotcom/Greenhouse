@@ -44,10 +44,10 @@ HEAT_STRESS_THRESHOLD = 35.0    # Heat stress above this temp
 # ============================================================================
 
 WATER_CAPACITY = 100.0   # Maximum water in system (units)
-WATER_INIT = 80.0        # Initial water level
+WATER_INIT = 100.0       # Initial water level (starts optimal/full)
 
-ENERGY_CAPACITY = 100.0  # Maximum energy/power budget (units)
-ENERGY_INIT = 80.0       # Initial energy level
+ENERGY_CAPACITY = 200.0  # Maximum energy/power budget (units)
+ENERGY_INIT = 200.0      # Initial energy level (starts optimal/full)
 
 # Daily resource limits
 DAILY_WATER_LIMIT = 20.0   # Max water that can be added per day

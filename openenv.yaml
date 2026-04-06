@@ -1,13 +1,13 @@
-"""
-openenv.yaml
-
-OpenEnv configuration for the greenhouse environment.
-Specifies environment metadata, observation/action spaces, and task definitions.
-"""
-
 name: "Greenhouse"
 version: "1.0.0"
-description: "AI-driven greenhouse operations simulator with sequential decision-making"
+description: "AI-driven greenhouse operations simulator. An agent controls 8 actuators (heating, cooling, humidifying, dehumidifying, ventilation, irrigation, lighting, CO₂ enrichment) to maximize crop health over a multi-step episode."
+author: "Greenhouse Team"
+tags:
+  - openenv
+  - greenhouse
+  - rl
+  - agriculture
+  - continuous-control
 
 # Environment metadata
 environment:
@@ -17,69 +17,49 @@ environment:
   kwargs:
     crop: "tomato"
     max_episode_steps: 500
-    include_weather: false
+    include_weather: true
     include_resource_limits: true
     difficulty: "medium"
 
-# Observation space
+# Observation space — typed via GreenhouseObservation (Pydantic)
 observation:
   type: "continuous"
   shape: [10]
   low: [-inf]
   high: [inf]
+  model: "env.models:GreenhouseObservation"
   description: |
-    [0] temperature (°C)
-    [1] humidity (%)
-    [2] co2 (ppm)
-    [3] light_intensity (µmol/m²/s)
-    [4] water_level (units)
-    [5] energy_level (units)
-    [6] crop_health (0.0-1.0)
-    [7] mold_presence (0.0-1.0)
-    [8] time_of_day (normalized)
-    [9] day_counter (normalized)
+    [0] temperature        (°C)
+    [1] humidity           (%)
+    [2] co2                (ppm)
+    [3] light_intensity    (µmol/m²/s)
+    [4] water_level        (units, 0–100)
+    [5] energy_level       (units, 0–200)
+    [6] crop_health        (0.0–1.0)
+    [7] mold_presence      (0.0–1.0)
+    [8] time_of_day_norm   (0.0–1.0, normalised from 0–23h)
+    [9] day_counter_norm   (normalised by 365)
 
-# Action space
+# Action space — typed via GreenhouseAction (Pydantic)
 action:
   type: "continuous"
   shape: [8]
   low: [0.0]
   high: [1.0]
+  model: "env.models:GreenhouseAction"
   description: |
-    [0] heating intensity
-    [1] cooling intensity
-    [2] humidifying intensity
-    [3] dehumidifying intensity
-    [4] ventilation intensity
-    [5] irrigation intensity
-    [6] lighting intensity
-    [7] co2_enrichment intensity
+    [0] heating            intensity (0=off, 1=full)
+    [1] cooling            intensity
+    [2] humidifying        intensity
+    [3] dehumidifying      intensity
+    [4] ventilation        intensity
+    [5] irrigation         intensity
+    [6] lighting           intensity
+    [7] co2_enrichment     intensity
 
-# Tasks
-tasks:
-  - name: "easy"
-    description: "Stabilization - maintain crop health in static environment"
-    difficulty: 1
-    episodes: 10
-    max_steps: 100
-    entry_point: "tasks.task_easy:EasyTask"
-  
-  - name: "medium"
-    description: "Adaptation - reactive control under weather disturbances"
-    difficulty: 2
-    episodes: 20
-    max_steps: 200
-    entry_point: "tasks.task_medium:MediumTask"
-  
-  - name: "hard"
-    description: "Optimization - planning under resource constraints"
-    difficulty: 3
-    episodes: 30
-    max_steps: 500
-    entry_point: "tasks.task_hard:HardTask"
-
-# Reward structure
+# Reward — typed via GreenhouseReward (Pydantic)
 reward:
+  model: "env.models:GreenhouseReward"
   crop_health_weight: 1.0
   stability_weight: 0.5
   resource_cost_weight: 0.3
@@ -88,8 +68,49 @@ reward:
     freeze_damage: 20.0
     crop_death: 50.0
 
+# Tasks
+tasks:
+  - name: "easy-stabilization"
+    description: "Stabilization — maintain crop health in a static, no-disturbance environment. Learn basic feedback control."
+    difficulty: 1
+    max_steps: 100
+    success_threshold: 0.7
+    entry_point: "tasks.task_easy:EasyTask"
+
+  - name: "medium-adaptation"
+    description: "Adaptation — reactive control under stochastic weather disturbances and resource limits."
+    difficulty: 2
+    max_steps: 200
+    success_threshold: 0.6
+    entry_point: "tasks.task_medium:MediumTask"
+
+  - name: "hard-optimization"
+    description: "Optimization — plan under strict energy/water budgets across a long 500-step horizon while handling weather."
+    difficulty: 3
+    max_steps: 500
+    success_threshold: 0.5
+    entry_point: "tasks.task_hard:HardTask"
+
+# API endpoints exposed by the HF Space
+api:
+  base_url: "https://{hf_space_name}.hf.space"
+  endpoints:
+    - path: "/reset"
+      method: "POST"
+      description: "Reset environment, returns initial observation"
+    - path: "/step"
+      method: "POST"
+      description: "Submit action array, returns (obs, reward, done, info)"
+    - path: "/state"
+      method: "GET"
+      description: "Get current typed GreenhouseObservation"
+    - path: "/_stcore/health"
+      method: "GET"
+      description: "Health check endpoint (Streamlit built-in)"
+
 # Agent interface
 agent:
   entry_point: "inference:GreenhouseAgent"
   method: "select_action"
   action_type: "continuous"
+  inference_script: "inference.py"

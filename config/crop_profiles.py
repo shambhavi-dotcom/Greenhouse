@@ -75,6 +75,28 @@ HERBS = {
 }
 
 # ============================================================================
+# CUCUMBER PROFILE
+# ============================================================================
+
+CUCUMBER = {
+    "name": "Cucumber",
+    "temp_optimal": 24.0,
+    "temp_min": 16.0,
+    "temp_max": 30.0,
+    "humidity_optimal": 75.0,
+    "humidity_min": 60.0,
+    "humidity_max": 90.0,
+    "light_optimal": 650.0,
+    "light_min": 300.0,
+    "co2_optimal": 950.0,
+    "growth_rate": 0.018,
+    "water_requirement": 3.0,
+    "cold_damage_threshold": 10.0,
+    "heat_stress_threshold": 34.0,
+    "disease_susceptibility": 0.35,
+}
+
+# ============================================================================
 # PROFILE REGISTRY
 # ============================================================================
 
@@ -82,6 +104,7 @@ CROP_PROFILES: Dict[str, Dict[str, Any]] = {
     "tomato": TOMATO,
     "lettuce": LETTUCE,
     "herbs": HERBS,
+    "cucumber": CUCUMBER,
 }
 
 

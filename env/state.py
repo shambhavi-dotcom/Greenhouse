@@ -10,6 +10,98 @@ from typing import Dict, Any
 import numpy as np
 
 
+# ==============================================================================
+# INITIAL CONDITION PRESETS
+# ==============================================================================
+# Each preset describes the starting state of the greenhouse.
+# Environmental variables (temp, humidity, CO2) are deliberately offset from
+# optimal to match the expected crop health tier — the agent must then work
+# to restore and maintain optimal conditions.
+#
+# Preset keys map to labels shown in the Streamlit sidebar.
+
+INITIAL_CONDITION_PRESETS: Dict[str, Dict[str, Any]] = {
+    "100% — Thriving (Optimal)": {
+        "label":        "Thriving",
+        "health":       1.0,
+        "temperature":  22.0,   # At optimal (22°C)
+        "humidity":     65.0,   # At optimal (65%)
+        "co2":          800.0,  # Near optimal (800 ppm)
+        "water_level":  100.0,  # Full reservoir
+        "energy_level": 200.0,  # Full energy bank
+        "mold_presence":0.0,
+        "description":  "All conditions optimal. Agent must maintain excellence.",
+        "color":        "#00e676",
+    },
+    "75% — Healthy (Minor Stress)": {
+        "label":        "Healthy",
+        "health":       0.75,
+        "temperature":  19.0,   # Slightly cool (3°C below optimal)
+        "humidity":     57.0,   # Slightly dry
+        "co2":          600.0,  # Below optimal
+        "water_level":  75.0,   # 75% reservoir
+        "energy_level": 150.0,  # 75% energy
+        "mold_presence":0.0,
+        "description":  "Mild temperature and humidity stress. Agent must restore balance.",
+        "color":        "#69f0ae",
+    },
+    "50% — Stressed (Recovery Needed)": {
+        "label":        "Stressed",
+        "health":       0.50,
+        "temperature":  15.0,   # Cold stress (7°C below optimal)
+        "humidity":     48.0,   # Dry, stressful conditions
+        "co2":          420.0,  # Near ambient (depleted)
+        "water_level":  50.0,   # Half reservoir
+        "energy_level": 100.0,  # Half energy
+        "mold_presence":0.05,   # Slight mold risk beginning
+        "description":  "Significant cold + humidity stress. Active recovery required.",
+        "color":        "#ffab40",
+    },
+    "25% — Critical (Emergency)": {
+        "label":        "Critical",
+        "health":       0.25,
+        "temperature":  10.0,   # Dangerous cold (12°C below optimal)
+        "humidity":     38.0,   # Very dry, approaching minimum
+        "co2":          300.0,  # Below healthy minimum
+        "water_level":  20.0,   # Near-empty reservoir
+        "energy_level": 50.0,   # Very low energy
+        "mold_presence":0.15,   # Active mold stress
+        "description":  "Emergency conditions. Agent must prevent crop death immediately.",
+        "color":        "#ff5252",
+    },
+}
+
+
+def build_initial_state(preset_name: str = "100% — Thriving (Optimal)") -> "GreenhouseState":
+    """
+    Build a GreenhouseState from a named initial condition preset.
+
+    Args:
+        preset_name: Key from INITIAL_CONDITION_PRESETS.
+
+    Returns:
+        A GreenhouseState with all variables set to match the preset.
+    """
+    preset = INITIAL_CONDITION_PRESETS.get(preset_name)
+    if preset is None:
+        raise ValueError(
+            f"Unknown preset '{preset_name}'. "
+            f"Available: {list(INITIAL_CONDITION_PRESETS.keys())}"
+        )
+    return GreenhouseState(
+        temperature=preset["temperature"],
+        humidity=preset["humidity"],
+        co2=preset["co2"],
+        light_intensity=0.0,
+        water_level=preset["water_level"],
+        energy_level=preset["energy_level"],
+        crop_health=preset["health"],
+        mold_presence=preset["mold_presence"],
+        time_of_day=12,
+        day_counter=0,
+    )
+
+
 @dataclass
 class GreenhouseState:
     """
@@ -30,22 +122,26 @@ class GreenhouseState:
     """
     
     # Environmental variables
-    temperature: float = 20.0
-    humidity: float = 60.0
-    co2: float = 400.0
+    temperature: float = 22.0  # Starts at optimal (TEMP_OPTIMAL)
+    humidity: float = 65.0     # Starts at optimal (HUMIDITY_OPTIMAL)
+    co2: float = 800.0         # Starts at optimal level
     light_intensity: float = 0.0
     
     # Resource levels
-    water_level: float = 80.0
-    energy_level: float = 80.0
+    water_level: float = 100.0  # Starts full (WATER_INIT)
+    energy_level: float = 200.0 # Starts full (ENERGY_INIT)
     
     # Crop state
-    crop_health: float = 0.8
+    crop_health: float = 1.0    # Starts thriving
     mold_presence: float = 0.0
     
     # Temporal state
     time_of_day: int = 12  # Hours (0-23)
     day_counter: int = 0
+
+    # Daily usage tracking (resets when a new day starts)
+    daily_water_added: float = 0.0
+    daily_energy_used: float = 0.0
     
     # External perturbation
     external_weather: Dict[str, float] = field(default_factory=lambda: {
@@ -135,6 +231,8 @@ class GreenhouseState:
             mold_presence=self.mold_presence,
             time_of_day=self.time_of_day,
             day_counter=self.day_counter,
+            daily_water_added=self.daily_water_added,
+            daily_energy_used=self.daily_energy_used,
             external_weather=self.external_weather.copy(),
         )
         return new_state
