@@ -100,11 +100,77 @@ class GreenhouseAgent:
         pass
 
 
-class RandomAgent(GreenhouseAgent):
-    """Agent that takes random actions (baseline / fallback when no API key)."""
+class GreenhouseAgent:
+    """Base class for all Greenhouse agents."""
+    def __init__(self):
+        self.last_reasoning = "Initialising..."
 
-    def select_action(self, observation: np.ndarray) -> np.ndarray:
-        return np.random.uniform(0, 1, 8).astype(np.float32)
+    def select_action(self, obs: np.ndarray) -> np.ndarray:
+        raise NotImplementedError
+
+    def get_reasoning(self) -> str:
+        return self.last_reasoning
+
+
+class RandomAgent(GreenhouseAgent):
+    """Simple baseline: selects actions uniformly at random."""
+    def select_action(self, obs: np.ndarray) -> np.ndarray:
+        self.last_reasoning = "Executing random exploratory actions (Noise baseline)."
+        return np.random.uniform(0.0, 1.0, 8).astype(np.float32)
+
+
+class SetpointAgent(GreenhouseAgent):
+    """
+    Intelligent baseline: uses basic control logic to target crop optima.
+    Ensures zero conflict between heating/cooling and humidifying/dehumidifying.
+    """
+    def select_action(self, obs: np.ndarray) -> np.ndarray:
+        # Observation indices: [temp, hum, co2, light, water, energy, health, mold, time, day]
+        temp, hum, co2 = obs[0], obs[1], obs[2]
+        water_level = obs[4]
+        
+        actions = np.zeros(8, dtype=np.float32)
+        reasons = []
+        
+        # 1. Temperature Control (Mutual Exclusion)
+        T_TARGET = 22.0
+        if temp < (T_TARGET - 1.0):
+            p = min(1.0, (T_TARGET - temp) / 5.0)
+            actions[0] = p  # heat
+            reasons.append(f"Cold detected ({temp:.1f}°C < {T_TARGET}°C): Heating at {int(p*100)}% intensity (Cooler OFF).")
+        elif temp > (T_TARGET + 1.0):
+            p = min(1.0, (temp - T_TARGET) / 5.0)
+            actions[1] = p  # cool
+            reasons.append(f"Heat detected ({temp:.1f}°C > {T_TARGET}°C): Cooling at {int(p*100)}% intensity (Heater OFF).")
+        else:
+            reasons.append(f"Temperature stable ({temp:.1f}°C). HVAC idle.")
+            
+        # 2. Humidity Control (Mutual Exclusion)
+        H_TARGET = 65.0
+        if hum < (H_TARGET - 5.0):
+            p = min(1.0, (H_TARGET - hum) / 15.0)
+            actions[2] = p # humidify
+            reasons.append(f"Low humidity ({hum:.1f}%): Humidifying (Dehumidifier OFF).")
+        elif hum > (H_TARGET + 5.0):
+            p = min(1.0, (hum - H_TARGET) / 15.0)
+            actions[3] = p # dehumidify
+            reasons.append(f"High humidity ({hum:.1f}%): Dehumidifying (Humidifier OFF).")
+        else:
+            reasons.append(f"Humidity optimal ({hum:.1f}%).")
+            
+        # 3. Resources & Environment
+        if co2 < 850.0:
+            actions[7] = 0.4
+            reasons.append("CO2 enrichment active to boost photosynthesis.")
+        if obs[3] < 200.0 and (18 > obs[8] > 6): # if day but cloudy
+            actions[6] = 0.3
+            reasons.append("Low natural light: Supplemental lighting ON.")
+        if water_level < 60.0:
+            actions[5] = 0.5
+            reasons.append("Irrigation engaged to replenish reservoir.")
+
+        self.last_reasoning = " | ".join(reasons)
+        return actions
 
 
 class LLMAgent(GreenhouseAgent):

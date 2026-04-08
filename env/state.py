@@ -13,61 +13,43 @@ import numpy as np
 # ==============================================================================
 # INITIAL CONDITION PRESETS
 # ==============================================================================
-# Each preset describes the starting state of the greenhouse.
-# Environmental variables (temp, humidity, CO2) are deliberately offset from
-# optimal to match the expected crop health tier — the agent must then work
-# to restore and maintain optimal conditions.
+# Each preset sets ONLY crop health and starting temperature.
+# All other variables (humidity, CO2, water, energy, mold) are always
+# initialised at their optimal/full values — resource constraints and
+# environmental disturbances are governed exclusively by task difficulty.
 #
-# Preset keys map to labels shown in the Streamlit sidebar.
+# Temperature is offset from optimal to match the health tier:
+#   a lower-health greenhouse was poorly managed, so it's also cooler.
+# The agent's goal is always to restore and maintain optimal conditions.
 
 INITIAL_CONDITION_PRESETS: Dict[str, Dict[str, Any]] = {
     "100% — Thriving (Optimal)": {
-        "label":        "Thriving",
-        "health":       1.0,
-        "temperature":  22.0,   # At optimal (22°C)
-        "humidity":     65.0,   # At optimal (65%)
-        "co2":          800.0,  # Near optimal (800 ppm)
-        "water_level":  100.0,  # Full reservoir
-        "energy_level": 200.0,  # Full energy bank
-        "mold_presence":0.0,
-        "description":  "All conditions optimal. Agent must maintain excellence.",
-        "color":        "#00e676",
+        "label":       "Thriving",
+        "health":      1.0,
+        "temperature": 22.0,   # At optimal — maintain excellence
+        "description": "Perfect conditions. Agent must sustain high performance.",
+        "color":       "#00e676",
     },
     "75% — Healthy (Minor Stress)": {
-        "label":        "Healthy",
-        "health":       0.75,
-        "temperature":  19.0,   # Slightly cool (3°C below optimal)
-        "humidity":     57.0,   # Slightly dry
-        "co2":          600.0,  # Below optimal
-        "water_level":  75.0,   # 75% reservoir
-        "energy_level": 150.0,  # 75% energy
-        "mold_presence":0.0,
-        "description":  "Mild temperature and humidity stress. Agent must restore balance.",
-        "color":        "#69f0ae",
+        "label":       "Healthy",
+        "health":      0.75,
+        "temperature": 19.5,   # 2.5°C below optimal — mild cold stress
+        "description": "Mild temperature stress. Agent must restore and maintain.",
+        "color":       "#69f0ae",
     },
     "50% — Stressed (Recovery Needed)": {
-        "label":        "Stressed",
-        "health":       0.50,
-        "temperature":  15.0,   # Cold stress (7°C below optimal)
-        "humidity":     48.0,   # Dry, stressful conditions
-        "co2":          420.0,  # Near ambient (depleted)
-        "water_level":  50.0,   # Half reservoir
-        "energy_level": 100.0,  # Half energy
-        "mold_presence":0.05,   # Slight mold risk beginning
-        "description":  "Significant cold + humidity stress. Active recovery required.",
-        "color":        "#ffab40",
+        "label":       "Stressed",
+        "health":      0.50,
+        "temperature": 16.0,   # 6°C below optimal — moderate cold stress
+        "description": "Significant cold stress. Active recovery required.",
+        "color":       "#ffab40",
     },
     "25% — Critical (Emergency)": {
-        "label":        "Critical",
-        "health":       0.25,
-        "temperature":  10.0,   # Dangerous cold (12°C below optimal)
-        "humidity":     38.0,   # Very dry, approaching minimum
-        "co2":          300.0,  # Below healthy minimum
-        "water_level":  20.0,   # Near-empty reservoir
-        "energy_level": 50.0,   # Very low energy
-        "mold_presence":0.15,   # Active mold stress
-        "description":  "Emergency conditions. Agent must prevent crop death immediately.",
-        "color":        "#ff5252",
+        "label":       "Critical",
+        "health":      0.25,
+        "temperature": 12.0,   # 10°C below optimal — severe cold stress
+        "description": "Emergency conditions. Prevent crop death immediately.",
+        "color":       "#ff5252",
     },
 }
 
@@ -76,11 +58,16 @@ def build_initial_state(preset_name: str = "100% — Thriving (Optimal)") -> "Gr
     """
     Build a GreenhouseState from a named initial condition preset.
 
+    Only health and temperature are taken from the preset.
+    All other variables are set to their optimal/full values so that
+    resource constraints and environmental dynamics are governed purely
+    by task difficulty (energy refill rate, weather, etc.).
+
     Args:
         preset_name: Key from INITIAL_CONDITION_PRESETS.
 
     Returns:
-        A GreenhouseState with all variables set to match the preset.
+        A GreenhouseState with all variables correctly initialised.
     """
     preset = INITIAL_CONDITION_PRESETS.get(preset_name)
     if preset is None:
@@ -90,14 +77,14 @@ def build_initial_state(preset_name: str = "100% — Thriving (Optimal)") -> "Gr
         )
     return GreenhouseState(
         temperature=preset["temperature"],
-        humidity=preset["humidity"],
-        co2=preset["co2"],
-        light_intensity=0.0,
-        water_level=preset["water_level"],
-        energy_level=preset["energy_level"],
+        humidity=65.0,        # always optimal — difficulty governs drift
+        co2=800.0,            # near-optimal, consistent starting point
+        light_intensity=0.0,  # computed each step from time-of-day
+        water_level=100.0,    # full reservoir — depletion driven by difficulty
+        energy_level=200.0,   # full energy bank — refill rate driven by difficulty
         crop_health=preset["health"],
-        mold_presence=preset["mold_presence"],
-        time_of_day=12,
+        mold_presence=0.0,    # clean start regardless of health tier
+        time_of_day=12,       # noon — maximum natural light at episode start
         day_counter=0,
     )
 

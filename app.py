@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from typing import Dict, List
 
-from inference import RandomAgent
+from inference import RandomAgent, SetpointAgent
 from env.environment import GreenhouseEnv
 from env.state import INITIAL_CONDITION_PRESETS
 from config import constants
@@ -70,7 +70,7 @@ CROPS = ["tomato", "lettuce", "herbs", "cucumber"]
 PRESET_KEYS = list(INITIAL_CONDITION_PRESETS.keys())
 
 st.sidebar.title("🌱 Greenhouse AI Control")
-mode = st.sidebar.radio("Mode", ["📊 Dashboard", "🎮 Single Episode", "📈 Batch Evaluation"])
+mode = st.sidebar.radio("Mode", ["📊 Dashboard", "🎮 Single Episode"])
 difficulty = st.sidebar.selectbox("Task Difficulty", ["Easy", "Medium", "Hard"])
 crop_view = st.sidebar.selectbox("Crop", CROPS)
 st.sidebar.markdown("---")
@@ -89,13 +89,24 @@ st.sidebar.markdown(
     <div style='background:#1a1f2e;border-left:3px solid {_preset["color"]};padding:8px 12px;
     border-radius:6px;margin-top:4px;margin-bottom:8px;'>
         <span style='color:{_preset["color"]};font-weight:600;'>● {_preset["label"]}</span><br/>
-        <span style='color:#888;font-size:0.8rem;'>{_preset["description"]}</span>
+        <span style='color:#aaa;font-size:0.82rem;'>
+        Start temp: <b>{_preset["temperature"]}°C</b> &nbsp;·&nbsp;
+        Health: <b>{int(_preset["health"]*100)}%</b>
+        </span><br/>
+        <span style='color:#888;font-size:0.78rem;'>{_preset["description"]}</span>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("**🤖 Controller Configuration**")
+agent_type = st.sidebar.selectbox(
+    "Agent Architecture",
+    ["Setpoint (Logical Control)", "Random (Noise)"],
+    index=0,
+    help="Logical: proportional control with mutual exclusion. Random: random actions."
+)
 step_delay = st.sidebar.slider("Step Speed (ms)", min_value=0, max_value=200, value=30,
                                help="Delay between live steps in milliseconds")
 st.sidebar.caption("One run produces results for all 4 crops. Use Crop to switch views.")
@@ -113,7 +124,9 @@ st.sidebar.markdown("""
 # ============================================================================
 
 def get_agent():
-    return RandomAgent()
+    if "Random" in agent_type:
+        return RandomAgent()
+    return SetpointAgent()
 
 
 def get_environment(diff: str, crop: str) -> GreenhouseEnv:
@@ -236,47 +249,13 @@ def empty_episode_data():
     return {
         "step": [], "temperature": [], "humidity": [], "co2": [],
         "light": [], "water": [], "energy": [], "health": [],
-        "soil_moisture": [], "reward": [], "cumulative_reward": [],
-        "fan": [], "water_sprinter": [], "co2_emitter": [], "light_control": [],
+        "reward": [], "cumulative_reward": [],
+        "heating": [], "cooling": [], "humidify": [], "dehumidify": [],
+        "ventilation": [], "irrigation": [], "lighting": [], "co2_enrich": [],
     }
 
 
-# ============================================================================
-# COMPLETE BATCH EPISODE (non-live, for Dashboard / Batch Evaluation)
-# ============================================================================
-
-def run_episode(env, agent, max_steps=None):
-    obs, info = env.reset()
-    episode_data = empty_episode_data()
-    done = False
-    step = 0
-    cumulative_reward = 0.0
-    max_steps = max_steps or env.max_episode_steps
-
-    while not done and step < max_steps:
-        action = agent.select_action(obs)
-        obs, reward, terminated, truncated, info = env.step(action)
-        cumulative_reward += reward
-        done = terminated or truncated
-
-        episode_data["step"].append(step)
-        episode_data["temperature"].append(env.state.temperature)
-        episode_data["humidity"].append(env.state.humidity)
-        episode_data["co2"].append(env.state.co2)
-        episode_data["light"].append(env.state.light_intensity)
-        episode_data["water"].append(env.state.water_level)
-        episode_data["soil_moisture"].append(env.state.water_level)
-        episode_data["energy"].append(env.state.energy_level)
-        episode_data["health"].append(env.state.crop_health)
-        episode_data["reward"].append(reward)
-        episode_data["cumulative_reward"].append(cumulative_reward)
-        episode_data["fan"].append(float(action[4]))
-        episode_data["water_sprinter"].append(float(action[5]))
-        episode_data["co2_emitter"].append(float(action[7]))
-        episode_data["light_control"].append(float(action[6]))
-        step += 1
-
-    return episode_data, env.state
+# (Batch execution logic removed)
 
 
 # ============================================================================
@@ -288,53 +267,52 @@ if mode == "📊 Dashboard":
     st.caption("Real-time snapshot across all sensors for the selected crop and difficulty.")
 
     env = get_environment(difficulty, crop_view)
-    agent = get_agent()
     obs, _ = env.reset(initial_condition=initial_condition)
-    for _ in range(50):
-        action = agent.select_action(obs)
-        obs, reward, terminated, truncated, info = env.step(action)
-        if terminated or truncated:
-            break
+    # Dashboard now shows the FRESH state from step 0 to prove the physics are correct
 
     col1, col2, col3, col4 = st.columns(4)
-    health_status, health_color = get_health_status(env.state.crop_health)
+    s = env.state()
+    health_status, health_color = get_health_status(s.crop_health)
+    
     with col1:
-        st.metric("🌿 Crop Health", f"{env.state.crop_health:.3f}")
+        st.metric("🌿 Crop Health", f"{s.crop_health:.3f}")
         st.markdown(f"<p class='{health_color}'>{health_status}</p>", unsafe_allow_html=True)
     with col2:
-        st.metric("🌡️ Temperature", f"{env.state.temperature:.1f}°C")
-        dev = abs(env.state.temperature - 22.0)
+        st.metric("🕰️ Current Time", f"Day {s.day_counter}, {s.time_of_day:02}:00 h")
+        dev = abs(s.temperature - 22.0)
         st.caption(f"Optimal 22°C | Deviation: {dev:.1f}°C")
     with col3:
-        st.metric("💧 Humidity", f"{env.state.humidity:.1f}%")
+        st.metric("💧 Humidity", f"{s.humidity:.1f}%")
         st.caption("Optimal: 65%")
     with col4:
-        st.metric("💦 Soil Moisture", f"{env.state.water_level:.1f}")
+        st.metric("💦 Soil Moisture", f"{s.water_level:.1f}")
         st.caption(f"Capacity: {constants.WATER_CAPACITY}")
 
     st.markdown("---")
     col1, col2 = st.columns(2)
+    s = env.state()
     with col1:
         st.subheader("💧 Water Reservoir")
-        water_pct = env.state.water_level / constants.WATER_CAPACITY
+        water_pct = s.water_level / constants.WATER_CAPACITY
         st.progress(water_pct)
-        st.caption(f"{env.state.water_level:.1f} / {constants.WATER_CAPACITY} ({water_pct*100:.1f}%)")
+        st.caption(f"{s.water_level:.1f} / {constants.WATER_CAPACITY} ({water_pct*100:.1f}%)")
     with col2:
         st.subheader("⚡ Energy Level")
-        energy_pct = env.state.energy_level / constants.ENERGY_CAPACITY
+        energy_pct = s.energy_level / constants.ENERGY_CAPACITY
         st.progress(energy_pct)
-        st.caption(f"{env.state.energy_level:.1f} / {constants.ENERGY_CAPACITY} ({energy_pct*100:.1f}%)")
+        st.caption(f"{s.energy_level:.1f} / {constants.ENERGY_CAPACITY} ({energy_pct*100:.1f}%)")
 
     st.markdown("---")
     col1, col2, col3, col4 = st.columns(4)
+    s = env.state()
     with col1:
-        st.plotly_chart(create_state_gauge(env.state.temperature, constants.TEMP_MIN, constants.TEMP_MAX, "Temp (°C)"), use_container_width=True)
+        st.plotly_chart(create_state_gauge(s.temperature, constants.TEMP_MIN, constants.TEMP_MAX, "Temp (°C)"), use_container_width=True)
     with col2:
-        st.plotly_chart(create_state_gauge(env.state.humidity, constants.HUMIDITY_MIN, constants.HUMIDITY_MAX, "Humidity (%)"), use_container_width=True)
+        st.plotly_chart(create_state_gauge(s.humidity, constants.HUMIDITY_MIN, constants.HUMIDITY_MAX, "Humidity (%)"), use_container_width=True)
     with col3:
-        st.plotly_chart(create_state_gauge(env.state.co2, constants.CO2_MIN, constants.CO2_MAX, "CO₂ (ppm)"), use_container_width=True)
+        st.plotly_chart(create_state_gauge(s.co2, constants.CO2_MIN, constants.CO2_MAX, "CO₂ (ppm)"), use_container_width=True)
     with col4:
-        st.plotly_chart(create_state_gauge(env.state.light_intensity, constants.LIGHT_MIN, constants.LIGHT_MAX, "Light (µmol)"), use_container_width=True)
+        st.plotly_chart(create_state_gauge(s.light_intensity, constants.LIGHT_MIN, constants.LIGHT_MAX, "Light (µmol)"), use_container_width=True)
 
     st.markdown("---")
     st.info("💡 **OpenEnv API:** `env.reset()` · `env.step(action)` · `env.get_state()` → typed `GreenhouseObservation`")
@@ -350,19 +328,23 @@ if mode == "📊 Dashboard":
 # ============================================================================
 
 elif mode == "🎮 Single Episode":
-    st.title("🎮 Real-Time Episode Playback")
-    st.caption("Watch the agent interact with the environment step-by-step in real time.")
+    st.subheader("🎮 Single Episode Simulation")
+    st.caption("Execute a multi-hour simulation episode with the selected controller.")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = st.columns([1.5, 1, 0.5])
     with col1:
-        max_steps = st.number_input("Max Steps", min_value=10, max_value=500, value=100)
+        simulation_hours = st.slider("Simulation Duration (Hours)", min_value=12, max_value=240, value=72, step=12)
     with col2:
-        selected_crop = st.selectbox("Crop for Live View", CROPS, index=CROPS.index(crop_view))
+        render_mode = st.radio("Render Style", ["Live Charts", "Final Summary Only"], horizontal=True)
     with col3:
-        run_button = st.button("▶️ Run Episode (Live)", key="run_episode")
+        st.markdown("<br>", unsafe_allow_html=True) # Spacer for alignment
+        run_button = st.button("▶️ Run", key="run_episode", use_container_width=True)
+    
+    selected_crop = st.selectbox("Crop for Live View", CROPS, index=CROPS.index(crop_view))
 
     # ── Preset info banner ─────────────────────────────────────────────────────
     _p = INITIAL_CONDITION_PRESETS[initial_condition]
+    _diff_note = {"Easy": "💡 Unlimited resources", "Medium": "⚖️ Moderate resource budget", "Hard": "🔋 Tight energy budget + weather"}.get(difficulty, "")
     st.markdown(
         f"""
         <div style='background:#1a1f2e;border:1px solid {_p["color"]}33;
@@ -370,11 +352,11 @@ elif mode == "🎮 Single Episode":
             <b style='color:{_p["color"]};'>Starting Condition:</b>
             <span style='color:#c9d1d9;'>
             &nbsp;{initial_condition} &nbsp;·&nbsp;
-            Temp: {_p["temperature"]}°C &nbsp;·&nbsp;
-            Humidity: {_p["humidity"]}% &nbsp;·&nbsp;
-            CO₂: {_p["co2"]} ppm &nbsp;·&nbsp;
-            Energy: {_p["energy_level"]} / {constants.ENERGY_CAPACITY}
+            Start Temp: <b>{_p["temperature"]}°C</b> &nbsp;·&nbsp;
+            Crop Health: <b>{int(_p["health"]*100)}%</b> &nbsp;·&nbsp;
+            Resources: <b>Full</b>
             </span>
+            &nbsp;&nbsp;<span style='color:#888;font-size:0.85rem;'>{_diff_note}</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -405,54 +387,66 @@ elif mode == "🎮 Single Episode":
         chart_health  = st.empty()   # crop health chart
         chart_actions = st.empty()   # actions chart
         chart_rewards = st.empty()   # rewards chart
+        reasoning_container = st.empty()   # reasoning panel
 
         # ── Run loop ──────────────────────────────────────────────────────
         episode_data = empty_episode_data()
         done = False
         step = 0
         cumulative_reward = 0.0
-
-        while not done and step < max_steps:
+        
+        while not done and step < simulation_hours:
+            # 1. Select and execute action
             action = agent.select_action(obs)
             obs, reward, terminated, truncated, step_info = env.step(action)
             cumulative_reward += reward
             done = terminated or truncated
+            s = env.state()
 
-            # Append data
-            episode_data["step"].append(step)
-            episode_data["temperature"].append(env.state.temperature)
-            episode_data["humidity"].append(env.state.humidity)
-            episode_data["co2"].append(env.state.co2)
-            episode_data["light"].append(env.state.light_intensity)
-            episode_data["water"].append(env.state.water_level)
-            episode_data["soil_moisture"].append(env.state.water_level)
-            episode_data["energy"].append(env.state.energy_level)
-            episode_data["health"].append(env.state.crop_health)
-            episode_data["reward"].append(reward)
-            episode_data["cumulative_reward"].append(cumulative_reward)
-            episode_data["fan"].append(float(action[4]))
-            episode_data["water_sprinter"].append(float(action[5]))
-            episode_data["co2_emitter"].append(float(action[7]))
-            episode_data["light_control"].append(float(action[6]))
-
-            # ── Update live metrics ───────────────────────────────────────
-            health_label, _ = get_health_status(env.state.crop_health)
-            metric_health.metric("🌿 Health",  f"{env.state.crop_health:.3f}")
-            metric_temp.metric("🌡️ Temp",      f"{env.state.temperature:.1f}°C")
-            metric_humid.metric("💧 Humidity", f"{env.state.humidity:.1f}%")
+            # 2. Update live metrics
+            health_label, _ = get_health_status(s.crop_health)
+            metric_health.metric("🌿 Health",  f"{s.crop_health:.3f}")
+            metric_temp.metric("🌡️ Temp",      f"{s.temperature:.1f}°C")
+            metric_humid.metric("💧 Humidity", f"{s.humidity:.1f}%")
             metric_reward.metric("🎯 Reward",  f"{cumulative_reward:.2f}")
-            metric_step.metric("📍 Step",      f"{step + 1} / {max_steps}")
+            metric_step.metric("📍 Duration",  f"{step + 1} / {simulation_hours} h")
 
-            progress_bar.progress(min((step + 1) / max_steps, 1.0))
+            progress_bar.progress(min((step + 1) / simulation_hours, 1.0))
             status_text.markdown(
-                f"<span class='step-badge'>Step {step+1}</span>  "
-                f"Health: **{env.state.crop_health:.3f}** · "
-                f"Temp: **{env.state.temperature:.1f}°C** · "
+                f"<span class='step-badge'>Hour {step+1}</span>  "
+                f"Health: **{s.crop_health:.3f}** · "
+                f"Temp: **{s.temperature:.1f}°C** · "
                 f"Reward: **{reward:+.3f}**",
                 unsafe_allow_html=True,
             )
 
-            # ── Update live charts every 5 steps (performance) ───────────
+            # 3. Append data to traces
+            episode_data["step"].append(step)
+            episode_data["temperature"].append(s.temperature)
+            episode_data["humidity"].append(s.humidity)
+            episode_data["co2"].append(s.co2)
+            episode_data["light"].append(s.light_intensity)
+            episode_data["water"].append(s.water_level)
+            episode_data["energy"].append(s.energy_level)
+            episode_data["health"].append(s.crop_health)
+            episode_data["reward"].append(reward)
+            episode_data["cumulative_reward"].append(cumulative_reward)
+            
+            # Map actions for charts
+            episode_data["heating"].append(float(action[0]))
+            episode_data["cooling"].append(float(action[1]))
+            episode_data["humidify"].append(float(action[2]))
+            episode_data["dehumidify"].append(float(action[3]))
+            episode_data["ventilation"].append(float(action[4]))
+            episode_data["irrigation"].append(float(action[5]))
+            episode_data["lighting"].append(float(action[6]))
+            episode_data["co2_enrich"].append(float(action[7]))
+
+            # 4. Update reasoning (if available)
+            if hasattr(agent, "get_reasoning"):
+                reasoning_container.markdown(f"**🧠 Decision Intelligence:** _{agent.get_reasoning()}_")
+
+            # 5. Update charts every 5 hours
             if (step + 1) % 5 == 0 or done:
                 chart_env.plotly_chart(
                     create_live_chart(episode_data, ["temperature", "humidity", "co2", "light"], "🌡️ Environmental Variables", height=180),
@@ -463,7 +457,7 @@ elif mode == "🎮 Single Episode":
                     use_container_width=True,
                 )
                 chart_actions.plotly_chart(
-                    create_live_chart(episode_data, ["fan", "water_sprinter", "light_control", "co2_emitter"], "🛠️ Actuator Intensities", height=180),
+                    create_live_chart(episode_data, ["heating", "cooling", "humidify", "dehumidify", "ventilation", "irrigation", "lighting", "co2_enrich"], "🛠️ Actuator Intensities", height=140),
                     use_container_width=True,
                 )
                 chart_rewards.plotly_chart(
@@ -477,17 +471,18 @@ elif mode == "🎮 Single Episode":
 
         # ── Episode complete ──────────────────────────────────────────────
         progress_bar.progress(1.0)
-        final_health = env.state.crop_health
+        final_health = env.state().crop_health
         health_label, health_class = get_health_status(final_health)
         status_text.success(f"✅ Episode complete! Final health: {final_health:.3f} — {health_label}")
 
         st.markdown("---")
         st.subheader("📊 Episode Summary")
-        s1, s2, s3, s4 = st.columns(4)
-        s1.metric("Final Health",   f"{final_health:.3f}")
-        s2.metric("Total Steps",    step)
-        s3.metric("Total Reward",   f"{cumulative_reward:.2f}")
-        s4.metric("Status",         health_label)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Final Health", f"{env.state().crop_health:.3f}")
+        col2.metric("Total Duration", f"{len(episode_data['step'])} Hours")
+        col3.metric("Total Reward", f"{episode_data['cumulative_reward'][-1]:.2f}")
+        
+        health_label, health_emoji = get_health_status(env.state().crop_health)
 
         # Typed state from OpenEnv state() API
         st.markdown("---")
@@ -504,91 +499,7 @@ elif mode == "🎮 Single Episode":
         )
 
 
-# ============================================================================
-# PAGE: BATCH EVALUATION
-# ============================================================================
-
-elif mode == "📈 Batch Evaluation":
-    st.title("📈 Batch Evaluation")
-    st.caption("Run full multi-episode evaluation across all crops and tasks.")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        num_episodes = st.slider("Episodes per Crop", min_value=1, max_value=20, value=5)
-    with col2:
-        show_detailed = st.checkbox("Show Detailed Charts", value=True)
-
-    run_eval_button = st.button("▶️ Start Evaluation", key="run_eval")
-    st.markdown("---")
-
-    if run_eval_button:
-        agent = get_agent()
-        progress_bar = st.progress(0.0)
-        status_text = st.empty()
-
-        evaluation_results = {crop: [] for crop in CROPS}
-
-        for crop_idx, crop in enumerate(CROPS):
-            for ep in range(num_episodes):
-                env = get_environment(difficulty, crop)
-                episode_data, final_state = run_episode(env, agent)
-                evaluation_results[crop].append({
-                    "episode": ep + 1,
-                    "health": final_state.crop_health,
-                    "reward": episode_data["cumulative_reward"][-1] if episode_data["cumulative_reward"] else 0,
-                    "steps": len(episode_data["step"]),
-                    "energy": final_state.energy_level,
-                    "soil_moisture": final_state.water_level,
-                })
-                total_progress = (crop_idx * num_episodes + ep + 1) / (len(CROPS) * num_episodes)
-                progress_bar.progress(total_progress)
-                status_text.text(f"🌱 {crop.title()} — Episode {ep+1}/{num_episodes}")
-
-        progress_bar.progress(1.0)
-        status_text.success("✅ Evaluation completed!")
-
-        st.subheader("📊 Results Summary")
-        summary_data = []
-        for crop in CROPS:
-            results = evaluation_results[crop]
-            avg_health  = float(np.mean([r["health"] for r in results]))
-            avg_reward  = float(np.mean([r["reward"] for r in results]))
-            success_rate = sum(1 for r in results if r["health"] > 0.5) / len(results)
-            summary_data.append({
-                "Crop": crop.title(),
-                "Avg Health": f"{avg_health:.3f}",
-                "Avg Reward": f"{avg_reward:.2f}",
-                "Success Rate": f"{success_rate:.1%}",
-                "Episodes": len(results),
-            })
-        st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
-
-        if show_detailed:
-            st.markdown("---")
-            st.subheader("📈 Detailed Distributions")
-            col1, col2 = st.columns(2)
-            health_data = [{"Crop": c.title(), "Health": r["health"]}
-                           for c in CROPS for r in evaluation_results[c]]
-            reward_data = [{"Crop": c.title(), "Reward": r["reward"]}
-                           for c in CROPS for r in evaluation_results[c]]
-            with col1:
-                fig = px.box(pd.DataFrame(health_data), x="Crop", y="Health",
-                             color="Crop", title="Crop Health Distribution",
-                             template="plotly_dark")
-                st.plotly_chart(fig, use_container_width=True)
-            with col2:
-                fig = px.box(pd.DataFrame(reward_data), x="Crop", y="Reward",
-                             color="Crop", title="Episode Reward Distribution",
-                             template="plotly_dark")
-                st.plotly_chart(fig, use_container_width=True)
-
-        results_df = pd.DataFrame(summary_data)
-        st.download_button(
-            label="📥 Download Results (CSV)",
-            data=results_df.to_csv(index=False),
-            file_name="evaluation_results.csv",
-            mime="text/csv",
-        )
+# (Batch Evaluation page removed)
 
 
 # ============================================================================

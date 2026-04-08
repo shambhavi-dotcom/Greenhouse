@@ -38,9 +38,11 @@ class GreenhouseObservation(BaseModel):
     crop_health: float = Field(..., ge=0.0, le=1.0, description="Crop health score (0.0=dead, 1.0=thriving)")
     mold_presence: float = Field(..., ge=0.0, le=1.0, description="Mold presence level (0.0=none, 1.0=severe)")
 
-    # Temporal features (normalised to [0, 1])
+    # Temporal features (raw and normalised)
     time_of_day_norm: float = Field(..., ge=0.0, le=1.0, description="Time of day normalised (0=midnight, 1=midnight)")
     day_counter_norm: float = Field(..., ge=0.0, description="Day number normalised by 365")
+    time_of_day: int = Field(default=0, ge=0, le=23, description="Hour of the current day (0-23)")
+    day_counter: int = Field(default=0, ge=0, description="Number of days since simulation start")
 
     # Episode metadata
     step: int = Field(default=0, description="Current step number within episode")
