@@ -81,7 +81,7 @@ class GreenhouseEnv(gym.Env):
 
         # Internal state — stored as self._state to avoid collision with state() method
         self._state = GreenhouseState()
-        self.step_count = 0
+        self.hour_count = 0
         self.episode_rewards = []
         self.episode_states = []
         self.initial_condition = "100% — Thriving (Optimal)"  # default preset
@@ -152,7 +152,7 @@ class GreenhouseEnv(gym.Env):
             self.initial_condition = initial_condition
 
         self._state = build_initial_state(self.initial_condition)
-        self.step_count = 0
+        self.hour_count = 0
         self.episode_rewards = []
         self.episode_states = []
 
@@ -173,15 +173,9 @@ class GreenhouseEnv(gym.Env):
         action: np.ndarray
     ) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """
-        Execute one time step of the environment.
-
-        Args:
-            action: Action array [0, 1]^8
-
-        Returns:
-            Tuple of (observation, reward, terminated, truncated, info)
+        Execute one hour of simulation.
         """
-        self.step_count += 1
+        self.hour_count += 1
 
         # Convert action array to action objects
         actions = self.action_space_obj.from_array(action)
@@ -194,21 +188,25 @@ class GreenhouseEnv(gym.Env):
             self.crop_profile,
             include_weather=self.include_weather,
             include_resource_limits=self.include_resource_limits,
-            dt=1.0
+            dt=1.0,
+            difficulty=self.difficulty,
         )
 
         # Compute reward
-        reward_dict = compute_reward(prev_state, self._state, action_info)
+        reward_dict = compute_reward(
+            prev_state, self._state, action_info,
+            crop_profile=self.crop_profile,
+        )
         reward = reward_dict["total"]
 
         # Check terminal conditions
         terminated = self._is_terminal()
-        truncated = self.step_count >= self.max_episode_steps
+        truncated = self.hour_count >= self.max_episode_steps
 
         # Prepare info and observation
         obs = self._state.to_array()
         info = {
-            "step": self.step_count,
+            "hour": self.hour_count,
             "reward_breakdown": reward_dict,
             "action_info": action_info,
             "crop_health": self._state.crop_health,
@@ -263,15 +261,10 @@ class GreenhouseEnv(gym.Env):
     # OPENENV REQUIRED: state() API
     # ==========================================================================
 
-    def get_state(self) -> GreenhouseObservation:
+    def state(self) -> GreenhouseObservation:
         """
-        Return current environment state as a typed Pydantic model.
-
-        Required by the OpenEnv spec alongside step() and reset().
-        Can be called at any point (before or after reset/step).
-
-        Returns:
-            GreenhouseObservation — fully typed snapshot of current state.
+        Returns the current state in a structured GreenhouseObservation format.
+        Strict OpenEnv compliant accessor.
         """
         return GreenhouseObservation(
             temperature=float(self._state.temperature),
@@ -282,12 +275,18 @@ class GreenhouseEnv(gym.Env):
             energy_level=float(self._state.energy_level),
             crop_health=float(self._state.crop_health),
             mold_presence=float(self._state.mold_presence),
-            time_of_day_norm=float(self._state.time_of_day) / 24.0,
-            day_counter_norm=float(self._state.day_counter) / 365.0,
-            step=self.step_count,
+            time_of_day_norm=float(self._state.time_of_day / 24.0),
+            day_counter_norm=float(self._state.day_counter / 365.0),
+            time_of_day=int(self._state.time_of_day),
+            day_counter=int(self._state.day_counter),
+            step=self.hour_count,
             difficulty=self.difficulty,
             crop=self.crop_name,
         )
+
+    def get_state(self) -> GreenhouseObservation:
+        """Alias for state() for backward compatibility."""
+        return self.state()
 
     # ==========================================================================
     # OPENENV TYPED WRAPPERS
