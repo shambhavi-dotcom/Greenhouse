@@ -2,13 +2,20 @@
 name = "greenhouse-openenv"
 version = "0.1.0"
 description = "Greenhouse climate control OpenEnv environment"
-authors = [{ name = "Your Name" }]
+authors = [{ name = "xDaksh" }]
+readme = "README.md"
+requires-python = ">=3.10"
+
 dependencies = [
     "fastapi",
     "uvicorn",
     "numpy",
     "pydantic",
+    "openenv-core>=0.2.0"
 ]
+
+[project.scripts]
+server = "api.server:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
