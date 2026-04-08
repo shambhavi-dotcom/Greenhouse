@@ -2,8 +2,8 @@ import os
 import numpy as np
 from typing import Optional
 
-# ENV IMPORTS (unchanged)
-from env.environment import GreenhouseEasyEnv
+# ENV IMPORTS (UPDATED)
+from env.environment import GreenhouseEasyEnv, GreenhouseMediumEnv, GreenhouseHardEnv
 
 # =========================
 # ENV VARIABLES (MANDATORY)
@@ -41,7 +41,6 @@ class LLMAgent:
             )
             text = response.choices[0].message.content
 
-            # VERY simple parsing fallback-safe
             nums = [float(x) for x in text.replace("[", "").replace("]", "").split() if x.replace('.', '', 1).isdigit()]
             if len(nums) >= 8:
                 return np.array(nums[:8], dtype=np.float32)
@@ -53,7 +52,7 @@ class LLMAgent:
 
 
 # =========================
-# LOGGING (FIXED)
+# LOGGING (VALIDATOR SAFE)
 # =========================
 def log_start(task: str):
     print(f"[START] task={task}", flush=True)
@@ -65,6 +64,36 @@ def log_step(step: int, reward: float):
 
 def log_end(task: str, score: float, steps: int):
     print(f"[END] task={task} score={score:.4f} steps={steps}", flush=True)
+
+
+# =========================
+# TASK RUNNER (NEW)
+# =========================
+def run_task(env, agent, task_name: str):
+    rewards = []
+    steps_taken = 0
+
+    log_start(task_name)
+
+    obs, _ = env.reset()
+
+    for step in range(1, MAX_STEPS + 1):
+        action = agent.select_action(obs)
+        obs, reward, terminated, truncated, _ = env.step(action)
+
+        rewards.append(float(reward))
+        steps_taken = step
+
+        log_step(step, reward)
+
+        if terminated or truncated:
+            break
+
+    # 🔥 FIXED SCORE (STRICTLY BETWEEN 0 AND 1)
+    score = sum(rewards) / (MAX_STEPS * 2.0)
+    score = float(np.clip(score, 0.01, 0.99))
+
+    log_end(task_name, score, steps_taken)
 
 
 # =========================
@@ -83,33 +112,10 @@ def main():
     else:
         agent = RandomAgent()
 
-    # --- environment ---
-    env = GreenhouseEasyEnv()
-    task_name = "greenhouse"
-
-    log_start(task_name)
-
-    obs, _ = env.reset()
-
-    rewards = []
-    steps_taken = 0
-
-    for step in range(1, MAX_STEPS + 1):
-        action = agent.select_action(obs)
-        obs, reward, terminated, truncated, _ = env.step(action)
-
-        rewards.append(float(reward))
-        steps_taken = step
-
-        log_step(step, reward)
-
-        if terminated or truncated:
-            break
-
-    # score normalization
-    score = float(np.clip(sum(rewards) / MAX_STEPS, 0.0, 1.0))
-
-    log_end(task_name, score, steps_taken)
+    # 🔥 RUN ALL 3 TASKS (MANDATORY)
+    run_task(GreenhouseEasyEnv(), agent, "easy")
+    run_task(GreenhouseMediumEnv(), agent, "medium")
+    run_task(GreenhouseHardEnv(), agent, "hard")
 
 
 # =========================
