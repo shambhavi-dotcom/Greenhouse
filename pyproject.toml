@@ -1,0 +1,19 @@
+[project]
+name = "greenhouse-openenv"
+version = "0.1.0"
+description = "Greenhouse climate control OpenEnv environment"
+authors = [{ name = "Your Name" }]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "numpy",
+    "pydantic",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["env*", "tasks*", "api*"]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
