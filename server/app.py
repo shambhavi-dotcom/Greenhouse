@@ -1,3 +1,16 @@
 # server/app.py
 
 from api.server import app
+import uvicorn
+
+
+def main():
+    """
+    Entry point for OpenEnv multi-mode deployment.
+    This starts the FastAPI server.
+    """
+    uvicorn.run(app, host="0.0.0.0", port=7860)
+
+
+if __name__ == "__main__":
+    main()
